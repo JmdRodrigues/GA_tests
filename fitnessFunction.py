@@ -55,7 +55,6 @@ def E_TA(seq_E, seq_TA):
 
 def fitness2():
 	t = (DP*we_e)+wta_ta
-	print(t)
 	return np.sum(t, axis=1).astype(dtype=np.int)
 
 def fitnessMatrix(e_ta, dp):

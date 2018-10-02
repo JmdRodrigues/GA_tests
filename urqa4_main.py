@@ -1,55 +1,20 @@
-import numpy as np
-import itertools
-import random
 import pandas as pd
-from GA_tests.fitnessFunction import weE, wtaTA, E_TA
+import numpy as np
+import random
 
-def load_exposure(fileap, filetl):
-	#Exposure Data
-	#load exposure data from APergo - scores for posture, load and forces---------------------------------------------------------
-	wb = pd.read_excel(fileap)
-	wp_dict = {}
-	for index, row in wb.iterrows():
-		if(row[4] == "Workplace"):
-			wp = wb.iloc[index+2][4]
-			station = wb.iloc[index+2][6]
-			team = wb.iloc[index+2][7]
-			wp_dict[wp] = dict(lh_s = 0, bp_s = 0, f_s = 0, tl_op={'1':0, '2':0, '3':0, '4':0, '5':0, '6':0, '7':0, '8':0, '9':0, '10':0, '11':0,'12':0})
+"""
 
-		#load handling score
-		elif(row[2] == "Load handing"):
-			if(isinstance(row[4], float)):
-				wp_dict[wp]["lh_s"] = 0
-			else:
-				wp_dict[wp]["lh_s"] = float(row[4][:-3])
-		#body posture
-		elif(row[6] == "Body posture"):
-			if(isinstance(row[8], float)):
-				wp_dict[wp]["bp_s"] = 0
-			else:
-				wp_dict[wp]["bp_s"] = float(row[8][:-3])
-		elif(row[11] == "Forces"):
-			if (isinstance(row[14], float)):
-				wp_dict[wp]["f_s"] = 0
-			else:
-				wp_dict[wp]["f_s"] = float(row[14][:-3])
+1 - load exposure data from apergo and team leader opinion
+2 - calculate a fitness value for an example of sequences
 
-	# load exposure data from Tleader for each body region-------------------------------------------------------
-	workplaces = ['13FL', '15R', 'ZA_K', 'TL_A4', '07R', '04F', 'TL_A2', '17R', '09L', 'T27L', 'ZA_S', 'T28IT']
-	tl_b = pd.read_excel(filetl)
-	# workplaces
-	for r, row in tl_b.iterrows():
-		# print(r)
-		for col, j in enumerate(workplaces):
-			wp_dict[j]["tl_op"][str(r + 1)] = row[col + 1]
-
-	return wp_dict
-
-def variability(seq, wta):
-	dseq = np.diff(seq)
-	dseq = np.insert(dseq, 0, 0)
-
-	return wta*dseq
+"""
+def fitnessSeq(wp_seq, wp_dict):
+	keys = ['p_s', 'f_s']
+	seq_temp = []
+	for key in keys:
+		seq_k = np.array([wp_dict[i][key] for i in wp_seq])
+		seq_temp.append(fitnessCalc(seq_k))
+	return np.sum(seq_temp)
 
 def fitnessCalc(seq):
 	DP = [1, 4, 2, 3]
@@ -57,31 +22,18 @@ def fitnessCalc(seq):
 
 	Wta = 10
 
-	we_e = We*seq
+	we_e = We * seq
 	wta_ta = variability(seq, Wta)
 
-	t = np.sum((DP*we_e) + wta_ta)
+	t = np.sum((DP * we_e) + wta_ta)
 
 	return t
 
-def fitnessSequence(wp_seq, wp_dict, workplaces):
+def variability(seq, w):
+	dseq = np.diff(seq)
+	dseq = np.insert(dseq, 0, 0)
 
-	keys = ['lh_s', 'bp_s', 'f_s', 'tl_op']
-	bsegts = range(1, 13)
-	seq_temp = []
-	for key in keys:
-		if(key is "tl_op"):
-			for bseg in bsegts:
-				seq_k = np.array([wp_dict[workplaces[i]][key][str(bseg)] for i in wp_seq])
-				seq_temp.append(fitnessCalc(seq_k))
-			seq_k = np.sum(seq_temp)
-			print("Team Leader Opinion")
-			print(seq_k)
-		else:
-			seq_k = np.array([wp_dict[workplaces[i]][key] for i in wp_seq])
-			print("AP-ergo")
-			print(fitnessCalc(seq_k))
-
+	return w * dseq
 
 def createPopulation(n, Nrot, Nworkers):
 	"""
@@ -92,7 +44,9 @@ def createPopulation(n, Nrot, Nworkers):
 	"""
 	pop = {}
 	for i in range(n):
-		pop[n] = dict(ind=createIndividual(Nrot, Nworkers), score=0)
+		pop[i] = dict(ind=createIndividual(Nrot, Nworkers), score=0)
+
+	return pop
 
 def createIndividual(Nshifts, Nworkers):
 	"""Make one attempt to generate a filled m**2 x m**2 Sudoku board,
@@ -215,28 +169,35 @@ def errorCorrection(mat):
 
 	return mat
 
+def load_scores(): #load apergo data - Fatores de risco AP ergo
+	apergo = pd.read_excel("URQA4/Fatores_risco_APergo_URQA4.xlsx")
+	wp_dict = {}
+	stations = apergo["Estação"].to_dict()
+	print(stations)
+	posture_score = apergo["Postura_score"].to_dict()
+	force_score = apergo["Force_Score"].to_dict()
 
-#main code-------------------------------------------
-
-Nworkers = 12
-Nshifts = 4
-
-Nmuscls = 1
+	for i in range(0, len(stations)):
+		wp_dict[stations[i]] = {'p_s': posture_score[i],
+								'f_s': force_score[i]
+								}
+	return wp_dict
 
 
 pop = createPopulation(10, 4, 12)
-#calculate fitness of that population
+print(pop)
 
 
 
-# cost of work position
-cstW = 10*np.random.rand(Nworkers)
-
-wp = load_exposure("Assembly_149.xlsx", "teamleaderOp.xlsx")
-workplaces = ['13FL', '15R', 'ZA_K', 'TL_A4', '07R', '04F', 'TL_A2', '17R', '09L', 'T27L', 'ZA_S', 'T28IT']
-seq = [5, 6, 10, 5]
-
-fitnessSequence(seq, wp, workplaces)
-
-
+# seq = [2, 3, 1, 5]
+# seq2 = [8, 2, 7, 10]
+# seq3 = [2, 6, 9, 10]
+#
+# sts = [stations[i] for i in seq]
+# sts2 = [stations[i] for i in seq2]
+# sts3 = [stations[i] for i in seq3]
+#
+# print(fitnessSeq(sts, wp_dict))
+# print(fitnessSeq(sts2, wp_dict))
+# print(fitnessSeq(sts3, wp_dict))
 
