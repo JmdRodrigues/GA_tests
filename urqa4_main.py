@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+from GA_tests.plotTools import gradient, findcloser, createSquareMatrix
+import matplotlib.pyplot as plt
 import random
 
 """
@@ -170,7 +172,7 @@ def errorCorrection(mat):
 	return mat
 
 def load_scores(): #load apergo data - Fatores de risco AP ergo
-	apergo = pd.read_excel("URQA4/Fatores_risco_APergo_URQA4.xlsx")
+	apergo = pd.read_excel("URQA4/Fatores_risco_APErgo_URQA4.xlsx")
 	wp_dict = {}
 	stations = apergo["Estação"].to_dict()
 	print(stations)
@@ -181,18 +183,47 @@ def load_scores(): #load apergo data - Fatores de risco AP ergo
 		wp_dict[stations[i]] = {'p_s': posture_score[i],
 								'f_s': force_score[i]
 								}
-	return wp_dict
+	return wp_dict, stations, posture_score, force_score
+
+def createScoreMatrixANDColor(score, ind):
+	"""
+
+	:param score: score dictionary
+	:param ind: individual, represented as a matrix with sequences in each row
+	:return: matrix with all the scores
+	"""
+	scr_mat = []
+	clr_mat = []
+
+	green = (60, 179, 113)
+	red = (178, 34, 34)
+
+	ll = np.linspace(min(score.values()), max(score.values()), 100000)
+	color = gradient(red, green, 100000)
+
+	print(score)
+	for seq in ind:
+		seq_i =  [score[ws-1] for ws in seq]
+		scr_mat.append(seq_i)
+		#color correspondance
+		colors = [color[findcloser(ll, s)] for s in seq_i]
+		clr_mat.append(colors)
+
+	return scr_mat, clr_mat
 
 
-pop = createPopulation(10, 4, 12)
-print(pop)
+wp_dict, stations, post_score, force_score = load_scores()
+
+ind = createIndividual(4, 12)
+post_mat, post_color = createScoreMatrixANDColor(post_score, ind)
+force_mat, force_color = createScoreMatrixANDColor(force_score, ind)
+
+print(post_mat)
+print(post_color[0][0])
+
+createSquareMatrix(4, 12, post_color, force_color, stations, ind)
 
 
-
-# seq = [2, 3, 1, 5]
-# seq2 = [8, 2, 7, 10]
-# seq3 = [2, 6, 9, 10]
-#
 # sts = [stations[i] for i in seq]
 # sts2 = [stations[i] for i in seq2]
 # sts3 = [stations[i] for i in seq3]
