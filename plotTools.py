@@ -39,15 +39,15 @@ def findcloser(array, value):
 	idx = (np.abs(array-value)).argmin()
 	return idx
 
-def createSquareMatrix(ncols, nrows, all_colors, stations, ind, score_per_seq, Circles=False):
+def createSquareMatrix(ncols, nrows, all_colors, stations, ind, score_per_seq, subplt = 111, Circles=False):
 	inbetween = 0.1
 	wid = 5
 	hei = 1
 	xx = np.arange(0, wid*ncols, (wid + inbetween))
 	yy = np.arange(0, hei*nrows + 1, (hei + inbetween))
 
-	fig = plt.figure(figsize=(100, 100))
-	ax = plt.subplot(111, aspect='equal')
+
+	ax = plt.subplot(subplt, aspect='equal')
 	for xi, x in zip(xx, range(0, ncols)):
 		ax.text(xi+wid/4, nrows+hei+1, "Rot "+str(x))
 		for yi, y in zip(reversed(yy), range(0, nrows)):
@@ -76,14 +76,15 @@ def createSquareMatrix(ncols, nrows, all_colors, stations, ind, score_per_seq, C
 			# ax.add_patch(cr_post6)
 			# ax.add_patch(cr_post9)
 			# ax.add_patch(cr_post14)
-			ax.text(xi+wid/2-wid/6, yi+2*hei/3, stations[ind[y][x]-1])
-			ax.text(-1.2,yi+hei/2, "Wkr" + str(y))
+			ax.text(xi+wid/2-wid/6, yi+2*hei/5, stations[ind[y][x]-1])
+			ax.text(-1.8,yi+hei/2, "Wkr" + str(y))
 			ax.text(wid*ncols+1.2, yi+hei/2, str(score_per_seq[y]))
-		ax.text(wid*ncols, -0.5, "Final Score:" + str(np.sum(score_per_seq)))
+		ax.text(wid*ncols, -0.8, "Final Score:" + str(np.sum(score_per_seq)))
 
 	plt.axis('off')
 	ax.axis([0, wid*ncols+1,0,nrows+1])
 	# plt.show()
+
 
 
 def createWorkplaceMatrix(risk_factors):

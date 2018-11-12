@@ -351,19 +351,38 @@ def load_TL_example():
 	ind_tl = [[code_dict[tl_matrix[j][i]] for i in range(0, 4)] for j in range(0, 12)]
 
 	return ind_tl
+
+def validateMatrix(mat):
+	#just checks i matrix is valid (has different line values and different column values)
+
+	#check lines:
+	for i in mat:
+		if(len(np.unique(i)) == len(i)):
+			print("lines are valid")
+		else:
+			return "not valid"
+
+	#check columns:
+	for j in range(0, np.shape(mat)[1]):
+		if(len(mat[:, j]) == len(np.unique(mat[:,j]))):
+			print("columns are valid")
+		else:
+			return "not valid"
+
 #.....................................................................
 wp_dict, stations, post_score, force_score, vibration_score, risk_factors = load_scores()
 
 # print(wp_dict)
 
 ind = createIndividual(4, 12)
+validateMatrix(ind)
 score_per_seq, ind_score = fitness(ind, stations, wp_dict)
 score_per_seq_tl, ind_score_tl = fitness(load_TL_example(), stations, wp_dict)
 
 #.....................................................................
 
 #genetic algorithm test
-pop = createPopulation(50, 4, 12)
+pop = createPopulation(10000, 4, 12)
 
 pop_scores = []
 #score each pop
@@ -377,21 +396,28 @@ for index in range(0, len(pop)):
 		min_score = ind_score
 		min_index = index
 
+
+np.savez('10000pops.npz', pop=[pop])
+print("Saved!!!")
+container = np.load("10000pops.npz")
+pop2 = [container[key] for key in container]
+print(pop2)
+
+
 # post_mat, post_color = createScoreMatrixANDColor(post_score, ind)
 # force_mat, force_color = createScoreMatrixANDColor(force_score, ind)
 
 all_colors = createWorkplaceMatrix(risk_factors)
 
 
-#create square matrix of the best scored individual
-createSquareMatrix(4, 12, all_colors, stations, pop[min_index]['ind'], score_per_seq)
+# #create square matrix of the best scored individual
+# createSquareMatrix(4, 12, all_colors, stations, pop[min_index]['ind'], score_per_seq)
+#
+# #team_leader matrix
+# createSquareMatrix(4, 12, all_colors, stations, load_TL_example(), score_per_seq_tl)
 
-#team_leader matrix
-createSquareMatrix(4, 12, all_colors, stations, load_TL_example(), score_per_seq_tl)
+# plt.show()
 
-plt.show()
-
-print(pop)
 worst_pop = get_best_pop(pop)
 ind_worse = pop[worst_pop]['ind']
 
@@ -404,14 +430,17 @@ x_data = [0]
 fig = plt.figure()
 ax = fig.add_subplot(111)
 Ln, = ax.plot(x_data, m_score)
-plt.ion()
+# plt.ion()
 nbr_repeatedValues = 0
 
-while(n<30):
+best_pop1 = get_best_pop2(pop)
+best_ind1 = pop[best_pop1]['ind']
+
+while(n<35):
 	#fitness population
 	pop = fitnesspop(pop, stations, wp_dict)
 	#tournament selection
-	winners = TournamentSelection(pop, 10, 2)
+	winners = TournamentSelection(pop, 5, 2)
 	#crossover
 	mat1, mat2 = crossover(pop[winners[0]], pop[winners[1]], 12)
 	#fitness of new elements
@@ -432,32 +461,35 @@ while(n<30):
 	plt.pause(.01)
 	plt.xlabel("Nbr of Cycles")
 	plt.ylabel("Mean Score of Population")
-	if(m_score[-2]==m_score[-1]):
-		nbr_repeatedValues+=1
-	if(nbr_repeatedValues > 15):
-		n = 1
-		pop = createPopulation(50, 4, 12)
-		current_score = meanScores(pop)
-		nn = 0
-		while(current_score>previous_score or nn<10):
-			pop = createPopulation(50, 4, 12)
-			current_score = meanScores(pop)
-			nn+=1
-		previous_score = current_score
-		nbr_repeatedValues=0
+	# if(m_score[-2]==m_score[-1]):
+	# 	nbr_repeatedValues+=1
+	# if(nbr_repeatedValues > 20):
+	# 	n = 1
+	# 	pop = createPopulation(50, 4, 12)
+	# 	current_score = meanScores(pop)
+	# 	nn = 0
+	# 	while(current_score>previous_score or nn<50):
+	# 		pop = createPopulation(50, 4, 12)
+	# 		current_score = meanScores(pop)
+	# 		nn+=1
+	# 	previous_score = current_score
+	# 	nbr_repeatedValues=0
 
 plt.show(block=True)
 
-best_pop = get_best_pop2(pop)
-best_ind = pop[best_pop]['ind']
+best_pop2 = get_best_pop2(pop)
+best_ind2 = pop[best_pop2]['ind']
 
+print(best_ind1)
+print(best_ind2)
+score_per_seq_worse, ind_score = fitness(best_ind1, stations, wp_dict)
+score_per_seq_best, ind_score2 = fitness(best_ind2, stations, wp_dict)
+fig = plt.figure(figsize=(200, 200))
+createSquareMatrix(4, 12, all_colors, stations, best_ind1, score_per_seq_worse, subplt=211)
+createSquareMatrix(4, 12, all_colors, stations, best_ind2, score_per_seq_best, subplt=212)
+plt.suptitle("Initial matrix ("+str(ind_score)+") vs Ending Matrix ("+str(ind_score2)+")")
 
-score_per_seq_worse, ind_score = fitness(ind_worse, stations, wp_dict)
-score_per_seq_best, ind_score = fitness(best_ind, stations, wp_dict)
-createSquareMatrix(4, 12, all_colors, stations, ind_worse, score_per_seq_worse)
-createSquareMatrix(4, 12, all_colors, stations, best_ind, score_per_seq_best)
-
-plt.show(block=True)
+# plt.show()
 
 
 
