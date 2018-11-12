@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from GA_tests.plotTools import gradient, findcloser, createSquareMatrix, createWorkplaceMatrix
+from GA_tests.plotTools import gradient, findcloser, createSquareMatrix, createWorkplaceMatrix, createSquareMatrix2
 import matplotlib.pyplot as plt
 import random
 import time
@@ -11,6 +11,161 @@ import time
 2 - calculate a fitness value for an example of sequences
 
 """
+
+"""
+Added new fitness calculation. The purpose is to convert the current model to a multi-objective function
+which comprises:
+- maximizing diversity
+- minimizing exposure
+
+Diversity is the extent at which exposure entities differ. In this case, we want to evaluate 
+diversity as the change of exposure levels in body regions.
+For this, we should be aware that:
+
+- it is independent of the exposure level
+- it should only depend on the successive changes in diversity
+
+Questions:
+- is going from 0 to 47 a good level of diversity?
+- is going from 0 to 10 worse or better than the previous one?
+- is there any difference that accounts for diversity?
+
+I believe that in this case, we should look at transitions of levels to check diversity.
+We can start by defining the mean +/- the standard deviation and get 4 levels, which give us
+the linear distribution of exposure values for that body region on all workstations.
+After that, any level transition is given a score of 1, else, it is 0 and there is no diversity.
+
+Next, we have to check the homogenety in diversity for the all body...this should be calculateed
+based on weights...because shoulder exposure might be worse...at least, we may check if the ap ergo
+gives weights to body regions...if so, we could use these weights.
+The final equation for homogenety can be:
+-->  (Ws*shoulder_div + Wt*trunk_div + We*elbow_div)/std (std is dividing, because higher values of std, mean more dispersion,
+which should be penalized)
+
+By minimizing exposure, we can reduce the chance of haveing sequences with high exposures. In this case, the exposure will be calculated
+with the final score given by the ap ergo function. 
+"""
+
+def objective_exposure(exposure_mat, stations, diversity_d, diversity_mstd):
+	scores_exp = []
+	scores_div = []
+	scores_div_per_musc = {'tk':[], 'sh':[], 'el':[]}
+	for worker in exposure_mat:
+		seq = [stations[w - 1] for w in worker]
+		div_seq_scores, div_per_musc = objective_diversity(seq, diversity_d, diversity_mstd)
+		for key in div_per_musc.keys():
+			scores_div_per_musc[key].append(div_per_musc[key])
+		scores_div.append(np.sum(div_seq_scores))
+		scores_exp.append(exposure_calc(seq))
+
+	f_sdiv = np.sum(scores_div)/(1+np.std(scores_div))
+	f_sexp = np.sum(scores_exp)*(1+np.std(scores_exp))
+	print(f_sdiv)
+	#get standard deviation for homogeneity of scores
+	return scores_exp, f_sexp, scores_div, scores_div_per_musc, f_sdiv
+
+def exposure_calc(exposure_seq):
+	duration = [0.23, 0.38, 0.19, 0.20]
+	seq_k = np.array([wp_dict[i]["OS"] for i in exposure_seq])
+
+	return np.sum(np.multiply(duration, seq_k))
+
+def objective_exposureV3(exposure_mat, stations, diversity_d, diversity_median, workers):
+	scores_exp = []
+	scores_div = []
+	scores_div_per_musc = {'tk': [], 'sh': [], 'el': []}
+	for index, worker in enumerate(exposure_mat):
+		seq = [stations[w - 1] for w in worker]
+		div_final_score, div_per_br = objective_diversityV3(workers[index], seq, diversity_d, diversity_median)
+		for key in div_per_br.keys():
+			scores_div_per_musc[key].append(div_per_br[key])
+		scores_div.append(div_final_score)
+		scores_exp.append(exposure_calc(seq))
+
+	f_sdiv = np.sum(scores_div) / (1 + abs(np.std(scores_div)))
+	f_sexp = np.sum(scores_exp) * (1 + abs(np.std(scores_exp)))
+
+	# get standard deviation for homogeneity of scores
+	return scores_exp, f_sexp, scores_div, scores_div_per_musc, f_sdiv
+def objective_exposureV2(exposure_mat, stations, diversity_d, diversity_median):
+	scores_exp = []
+	scores_div = []
+	scores_div_per_musc = {'tk':[], 'sh':[], 'el':[]}
+	for worker in exposure_mat:
+		seq = [stations[w - 1] for w in worker]
+		div_seq_scores, div_per_musc = objective_diversityV3(seq, diversity_d, diversity_median)
+		for key in div_per_musc.keys():
+			scores_div_per_musc[key].append(div_per_musc[key])
+		scores_div.append(np.sum(div_seq_scores))
+		scores_exp.append(exposure_calc(seq))
+
+	f_sdiv = np.sum(scores_div)/(1+np.std(scores_div))
+	f_sexp = np.sum(scores_exp)*(1+np.std(scores_exp))
+	print(f_sdiv)
+	#get standard deviation for homogeneity of scores
+	return scores_exp, f_sexp, scores_div, scores_div_per_musc, f_sdiv
+
+
+# def objective_diversityV2(seq, diversity_d, diversity_median):
+# 	for ws in seq:
+# 		for br in diversity_d.keys():
+# 			if(dd[ws][br] >= mstd[br][0]):
+# 				ss[br].append(4)
+# 			elif(dd[ws][br] < mstd[br][0] and dd[ws][br] > mstd[br][1]):
+# 				ss[br].append(3)
+# 			elif(dd[ws][br] <mstd[br][1] and dd[ws][br] > mstd[br][2]):
+# 				ss[br].append(2)
+# 			elif (dd[ws][br] < mstd[br][2]):
+# 				ss[br].append(1)
+# 	distance_med = divers
+
+def objective_diversity(exposure_seq, diversity_d, diversity_mstd):
+	"""
+	divide in 4 levels of diversity (mean +/- std)
+	:return:
+	"""
+	ss = get_diversity_levels(exposure_seq, diversity_d, diversity_mstd)
+	dss = []
+	for i in ss.keys():
+		dss.append(len(np.where(np.diff(ss[i])!=0)[0]))
+
+	return dss/(1+np.std(dss)), ss
+
+def get_diversity_levels(seq, dd, mstd):
+	ss = {'tk':[], 'sh':[], 'el':[]}
+	for ws in seq:
+		for br in mstd.keys():
+			if(dd[ws][br] >= mstd[br][0]):
+				ss[br].append(4)
+			elif(dd[ws][br] < mstd[br][0] and dd[ws][br] > mstd[br][1]):
+				ss[br].append(3)
+			elif(dd[ws][br] <mstd[br][1] and dd[ws][br] > mstd[br][2]):
+				ss[br].append(2)
+			elif (dd[ws][br] < mstd[br][2]):
+				ss[br].append(1)
+
+	return ss
+
+def objective_diversityV3(worker, seq, dd, medd):
+	#score for each body region
+	f_ss = {'tk':[], 'sh':[], 'el':[]}
+
+	for br in ["tk", "sh", "el"]:
+		med_seq = []
+		for ws in seq:
+			if(dd[ws][br] >= medd[worker][br]):
+				med_seq.append(1)
+			else:
+				med_seq.append(0)
+
+		# diversity for each body region
+		f_ss[br] = sum(abs(np.diff(med_seq)))
+
+	final_score = (f_ss["tk"] + f_ss["sh"] + f_ss["el"])/(1+np.std(f_ss["tk"] + f_ss["sh"] + f_ss["el"])**2)
+
+	return final_score, f_ss
+
+
 def fitness(ind, stations, wp_dict):
 	val = []
 	for worker in ind:
@@ -93,19 +248,25 @@ def createIndividual(Nshifts, Nworkers):
 # def FitnessFunction():
 
 
-def crossover(ind1, ind2, nworkers, type="skip_row"):
+def crossover(ind1, ind2, nworkers, nshifts):
+	types = ["skip_row", "skipcol"]
+	tp = types[random.randint(0, len(types)-1)]
 	#mating step
-	if type is "skip_row":
+	if tp is "skip_row":
 		"""
 			With this each row is sequentially shifted between the two individuals
 		"""
 		mat1, mat2 = skiprow(ind1, ind2, nworkers)
-		mat1 = errorCorrection(mat1)
-		mat2 = errorCorrection(mat2)
+		mat1 = GeneControl(mat1)
+		mat2 = GeneControl(mat2)
 
-		return mat1, mat2
+	elif tp is "skipcol":
+		mat1, mat2 = skipcol(ind1, ind2, nshifts)
+		mat1 = GeneControl(mat1)
+		mat2 = GeneControl(mat2)
 
-	# elif type is "point_row":
+	return mat1, mat2
+
 
 def TournamentSelection(pop, k, n):
 	"""
@@ -139,6 +300,62 @@ def TournamentSelection(pop, k, n):
 		#Compete the elements of the population
 		# winner = the one with the higher score
 
+def skipcol(prnt1, prnt2, Nshifts):
+	"""
+	not ready for other nshifts than 4
+	:param prnt1:
+	:param prnt2:
+	:param Nshifts:
+	:return:
+	"""
+
+	prnt1 = np.array(prnt1["ind"])
+	prnt2 = np.array(prnt2["ind"])
+
+	child1 = prnt1
+	child2 = prnt2
+
+	rnd1_1 = random.randint(1, Nshifts)
+	rnd1_2 = random.randint(1, Nshifts)
+	rnd2_1 = random.randint(1, Nshifts)
+	rnd2_2 = random.randint(1, Nshifts)
+
+	lst = range(0, Nshifts)
+	node1 = rnd1_1-1
+	node2 = rnd2_1-1
+	lst_n1 = np.r_[lst[node1:], lst[:node1]].astype(int)
+	lst_n2 = np.r_[lst[node2:], lst[:node2]].astype(int)
+
+	if(rnd1_2%2 == 0):
+		#pair means that it is alternate
+		if(rnd2_2%2 == 0):
+			#pair means that it is alternate
+			for i in range(0, Nshifts, 2):
+				print(lst_n1[i])
+				print(lst_n2[i])
+				child1[:, lst_n1[i]] = prnt2[:, lst_n2[i]]
+				child2[:, lst_n1[i]] = prnt1[:, lst_n2[i]]
+		else:
+			#even means that it is sequential
+			for i, ii in zip(range(0, Nshifts, 2), range(0, Nshifts//2)):
+				child1[:, lst_n1[i]] = prnt2[:, lst_n2[ii]]
+				child2[:, lst_n1[i]] = prnt1[:, lst_n2[ii]]
+
+	else:
+		# pair means that it is alternate
+		if (rnd2_2 % 2 == 0):
+			# pair means that it is alternate
+			for i, ii in zip(range(0, Nshifts, 2), range(0, Nshifts//2)):
+				child1[:, lst_n1[ii]] = prnt2[:, lst_n2[i]]
+				child2[:, lst_n1[ii]] = prnt1[:, lst_n2[i]]
+		else:
+			# even means that it is sequential
+			for i in range(0, Nshifts // 2):
+				child1[:, lst_n1[i]] = prnt2[:, lst_n2[i]]
+				child2[:, lst_n1[i]] = prnt1[:, lst_n2[i]]
+
+	return child1, child2
+
 def skiprow(mat1, mat2, Nworkers):
 
 	child1 = mat1["ind"]
@@ -165,7 +382,7 @@ def skiprow(mat1, mat2, Nworkers):
 #
 # 	return poss_r
 
-def errorCorrection(mat):
+def GeneControl(mat):
 
 	a = mat
 	# go through each row to find repeated values
@@ -224,10 +441,11 @@ def load_scores(): #load apergo data - Fatores de risco AP ergo
 	for tag, key in zip(key_tags, apergo.keys()[3:]):
 		mn = apergo[key].mean()
 		std = apergo[key].std()
-		if(std == 0):
-			score_list = np.array(list(apergo[key]))
-		else:
-			score_list = (np.array(list(apergo[key])) - mn)/std
+		score_list = np.array(list(apergo[key]))
+		# if(std == 0):
+		# 	score_list = np.array(list(apergo[key]))
+		# else:
+		# 	score_list = (np.array(list(apergo[key])) - mn)/std
 		tag_dict[tag] = score_list
 
 
@@ -267,10 +485,13 @@ def createScoreMatrixANDColor(score, ind):
 
 def fitnesspop(pop, stations, wp_dict):
 	for index in range(0, len(pop)):
-		seq_scores, ind_score = fitness(pop[index]['ind'], stations, wp_dict)
+		# seq_scores, ind_score = fitness(pop[index]['ind'], stations, wp_dict)
 		# print(seq_scores)
-		pop[index]['score'] = ind_score
-
+		exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
+			pop[index]['ind'], stations, diversity_dict, diversity_mstd)
+		final_score = (np.sum(exp_score_per_seq) * np.std(exp_score_per_seq)) / (
+					np.sum(div_score_per_seq) / np.std(div_score_per_seq))
+		pop[index]['score'] = final_score
 
 	return pop
 
@@ -347,10 +568,84 @@ def load_TL_example():
 				 ['H', 'F', 'A', 'K'],
 				 ['I', 'E', 'D', 'C'],
 				 ['F', 'A', 'I', 'L'], ]
+	tl_matrix2 = [
+		["K",	"D", "C", "H"],
+				  ["C",	"H", "I", "E"],
+				  ["I",	"E", "D", "L"],
+				  ["E",	"J", "A", "F"],
+				  ["D", "M", "E", "K"],
+				  ["M", "I", "F", "C"],
+				  ["L", "K", "M", "M"],
+				  ["A", "F", "B", "A"],
+				  ["H", "A", "J", "B"],
+				  ["J", "C", "L", "D"],
+				  ["B", "L", "K", "I"],
+				  ["F", "B", "H", "J"]
+	              ]
 
-	ind_tl = [[code_dict[tl_matrix[j][i]] for i in range(0, 4)] for j in range(0, 12)]
+	tl_matrix3 = [["M", "H", "A", "M"],
+	              ["A", "L", "J", "E"],
+	              ["I", "A", "H", "C"],
+	              ["F", "B", "I", "J"],
+	              ["B", "F", "C", "H"],
+	              ["J", "M", "L", "D"],
+	              ["K", "I", "M", "B"],
+	              ["C", "D", "E", "K"],
+	              ["E", "J", "D", "A"],
+	              ["L", "E", "K", "I"],
+	              ["D", "K", "B", "F"],
+	              ["H", "C", "F", "L"]]
 
-	return ind_tl
+	tl_matrix4 = [["M", "E", "D", "J"],
+	              ["D", "I", "E", "M"],
+	              ["C", "H", "B", "F"],
+	              ["A", "K", "I", "L"],
+	              ["H", "C", "J", "K"],
+	              ["E", "D", "L", "A"],
+	              ["I", "J", "K", "E"],
+	              ["B", "M", "C", "D"],
+	              ["J", "B", "M", "H"],
+	              ["L", "A", "F", "C"],
+	              ["F", "L", "H", "B"],
+	              ["K", "F", "A", "I"]]
+
+	tl_matrix5 = [
+		["L", "B", "K", "D"],
+		["H", "L", "J", "E"],
+		["M", "D", "D", "K"],
+		["E",  "M", "B", "F"],
+		["C", "H", "M", "A"],
+		["A", "I", "E", "L"],
+		["K", "J", "C", "I"],
+		["B", "F", "H", "C"],
+		["J", "A", "F", "B"],
+		["I", "K", "A", "M"],
+		["D", "C", "L", "H"],
+		["F", "E", "I", "J"]]
+
+	tl_matrx6 = [
+		["A", "F", "C", "K"],
+		 ["M", "A", "F", "D"],
+		["K", "E", "D", "J"],
+		["E", "K", "I", "H"],
+		["B", "L", "M", "A"],
+		["H", "I", "L", "B"],
+		["L", "H", "A", "M"],
+		["I", "M", "J", "E"],
+		["C", "D", "B", "I"],
+		["J", "B", "H", "C"],
+		["D", "C", "K",  "L"],
+		["F", "J", "E", "F"]
+	]
+
+	tl_dict_pop = {"1":tl_matrix, '2': tl_matrix2, '3':tl_matrix3, '4':tl_matrix4, '5':tl_matrix5, '6':tl_matrx6}
+
+	for tl in tl_dict_pop.keys():
+		ind_tl = [[code_dict[tl_dict_pop[tl][j][i]] for i in range(0, 4)] for j in range(0, 12)]
+		tl_dict_pop[tl] = ind_tl
+
+	return tl_dict_pop
+
 
 def validateMatrix(mat):
 	#just checks i matrix is valid (has different line values and different column values)
@@ -369,39 +664,176 @@ def validateMatrix(mat):
 		else:
 			return "not valid"
 
+def list_scores_diversity(score_dict):
+	diversity_dict = {}
+	diversity_mean_std = {}
+	tk = []
+	sh = []
+	el = []
+	for workstation in score_dict.keys():
+		diversity_dict[workstation] = {'tk':score_dict[workstation]['%B']+score_dict[workstation]['%TB'],
+									   'sh':score_dict[workstation]['%SH']+score_dict[workstation]['%HL'],
+									   'el':score_dict[workstation]['%R6']}
+
+		tk.append(score_dict[workstation]['%B']+score_dict[workstation]['%TB'])
+		sh.append(score_dict[workstation]['%SH']+score_dict[workstation]['%HL'])
+		el.append(score_dict[workstation]['%R6'])
+
+	tk_mean = np.mean(tk)
+	tk_std = np.std(tk)
+	sh_mean = np.mean(sh)
+	sh_std = np.std(sh)
+	el_mean = np.mean(sh)
+	el_std = np.std(sh)
+
+	diversity_mean_std['tk'] = [tk_mean + tk_std, tk_mean, tk_mean - tk_std]
+	diversity_mean_std['sh'] = [sh_mean + sh_std, sh_mean, sh_mean - sh_std]
+	diversity_mean_std['el'] = [el_mean + el_std, el_mean, el_mean - el_std]
+
+	return diversity_dict, diversity_mean_std
+
+def diversity_list_2(score_dict):
+	diversity_dict = {}
+	diversity_mean_std = {}
+	tk = []
+	sh = []
+	el = []
+	for workstation in score_dict.keys():
+		diversity_dict[workstation] = {'tk': score_dict[workstation]['%B'] + score_dict[workstation]['%TB'],
+									   'sh': score_dict[workstation]['%SH'] + score_dict[workstation]['%HL'],
+									   'el': score_dict[workstation]['%R6'] + score_dict[workstation]['%R8']
+											 + score_dict[workstation]['%RT']}
+
+
+		tk.append(score_dict[workstation]['%B'] + score_dict[workstation]['%TB'])
+		sh.append(score_dict[workstation]['%SH'] + score_dict[workstation]['%HL'])
+		el.append(score_dict[workstation]['%R6'] + score_dict[workstation]['%R8']
+											 + score_dict[workstation]['%RT'])
+
+	tk_med = np.median(tk)
+	sh_med = np.median(sh)
+	el_med = np.median(el)
+
+	ax1 = plt.subplot(3,1,1)
+	ax1.plot(tk, 'o')
+	ax1.set_title("Trunk: "+ str(tk_med))
+	ax1.axhline(tk_med, xmin=0, xmax=len(tk))
+	ax2 = plt.subplot(3,1,2)
+	ax2.plot(sh, 'o')
+	ax2.set_title("Shoulder: "+ str(sh_med))
+	ax2.axhline(sh_med, xmin=0, xmax=len(sh))
+	ax3 = plt.subplot(3,1,3)
+	ax3.plot(el, 'o')
+	ax3.set_title("Elbow: "+ str(el_med))
+	ax3.axhline(el_med, xmin=0, xmax=len(el))
+	plt.show()
+
+def load_median_list(score_dict, versatility):
+	diversity_dict = {}
+	diversity_median = {}
+
+	for workstation in score_dict.keys():
+		diversity_dict[workstation] = {'tk': score_dict[workstation]['%B'] + score_dict[workstation]['%TB'],
+									   'sh': score_dict[workstation]['%SH'] + score_dict[workstation]['%HL'],
+									   'el': score_dict[workstation]['%R6'] + score_dict[workstation]['%R8']
+											 + score_dict[workstation]['%RT']}
+	for worker in versatility.index:
+		med_wk = {br: np.median([diversity_dict[ws][br] for ws in score_dict.keys()]) for br in ['tk', 'sh', 'el']}
+		diversity_median[worker] = med_wk
+
+	return diversity_median
+
+def load_versatility(file):
+	xl = pd.read_excel(file, "Versatilidade")
+	print(xl)
+	return xl.iloc[:12, :12], xl.index
+
+
 #.....................................................................
+#a fazer para mostrar 3ª:
+"""
+1 - fazer load de varias matrizes planeadas pelos TL e verificar o resultado atribuido
+2 - testar o algoritmo e verificar se gera melhores matrizes
+3 - testar o algoritmo com varios tipos de:
+				a - crossover
+				b - tamanho de população
+				c - probabilidades de crossover
+				d - mutacoes
+				e - de que forma podemos encaixar ai os sintomas
+"""
+
+"""Tarefa 1-------------------------------------------------------------------------------------------------------
+
+	Load das matrizes dos team leaders e dar um score
+"""
+#load scores and versatility matrixes
 wp_dict, stations, post_score, force_score, vibration_score, risk_factors = load_scores()
+diversity_dict, diversity_mstd = list_scores_diversity(wp_dict)
+versatility, workers = load_versatility(r"/media/jean/FishStory/Projectos/Doutoramento/GeneticAlgorithmforRotationPlan/GA_tests/URQA4/Matriz versatilidade_A4B.xlsx")
+#create list of median list for each worker and body region
+median_list = load_median_list(wp_dict, versatility)
 
-# print(wp_dict)
+#Matrix that shows the color risk of each workplace
+all_colors = createWorkplaceMatrix(risk_factors)
 
-ind = createIndividual(4, 12)
-validateMatrix(ind)
-score_per_seq, ind_score = fitness(ind, stations, wp_dict)
-score_per_seq_tl, ind_score_tl = fitness(load_TL_example(), stations, wp_dict)
+#1 - load de matrizes de TL
+tl_dct = load_TL_example()
+
+#team leader matrixes representation
+for tl in tl_dct.keys():
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(
+		tl_dct[tl], stations, diversity_dict, median_list, workers)
+	createSquareMatrix2(4, 12, all_colors, stations, tl_dct[tl], exp_score_per_seq, div_score_per_seq, median_list, workers, wp_dict)
+	plt.show()
+#
+# #create a chromossome - rotation matrix
+# ind = createIndividual(4, 12)
+# #find if it is valid or not
+# validateMatrix(ind)
+
+#calculate exposure and diversity vaues for the chromossome
+exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(ind, stations, diversity_dict, median_list, workers)
+#show the results in the matrix
+createSquareMatrix2(4, 12, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, diversity_mstd, wp_dict)
+plt.show()
+
+
+
 
 #.....................................................................
 
 #genetic algorithm test
-pop = createPopulation(10000, 4, 12)
+pop = createPopulation(20, 4, 12)
+
+for individual in range(0, len(pop)):
+	ind = pop[individual]['ind']
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
+		ind, stations, diversity_dict, diversity_mstd)
+	print(exp_ind_score)
+	# createSquareMatrix2(4, 12, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, diversity_mstd, wp_dict)
+	# plt.show()
 
 pop_scores = []
 #score each pop
 min_score = 100000000
 min_index = 0
 for index in range(0, len(pop)):
-	seq_scores, ind_score = fitness(pop[index]['ind'], stations, wp_dict)
+	# seq_scores, ind_score = fitness(pop[index]['ind'], stations, wp_dict)
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
+		pop[index]['ind'], stations, diversity_dict, diversity_mstd)
 	# print(seq_scores)
-	pop[index]['score'] = ind_score
+	final_score = (np.sum(exp_score_per_seq)*np.std(exp_score_per_seq))/(np.sum(div_score_per_seq)/np.std(div_score_per_seq))
+	pop[index]['score'] = final_score
 	if(ind_score < min_score):
-		min_score = ind_score
+		min_score = exp_ind_score
 		min_index = index
 
 
-np.savez('10000pops.npz', pop=[pop])
-print("Saved!!!")
-container = np.load("10000pops.npz")
-pop2 = [container[key] for key in container]
-print(pop2)
+# np.savez('10000pops.npz', pop=[pop])
+# print("Saved!!!")
+# container = np.load("10000pops.npz")
+# pop2 = [container[key] for key in container]
+# print(pop2)
 
 
 # post_mat, post_color = createScoreMatrixANDColor(post_score, ind)
@@ -409,12 +841,17 @@ print(pop2)
 
 all_colors = createWorkplaceMatrix(risk_factors)
 
-
 # #create square matrix of the best scored individual
 # createSquareMatrix(4, 12, all_colors, stations, pop[min_index]['ind'], score_per_seq)
 #
 # #team_leader matrix
 # createSquareMatrix(4, 12, all_colors, stations, load_TL_example(), score_per_seq_tl)
+
+#create square matrix of the best scored individual
+createSquareMatrix(4, 12, all_colors, stations, pop[min_index]['ind'], score_per_seq)
+
+#team_leader matrix
+createSquareMatrix(4, 12, all_colors, stations, load_TL_example(), score_per_seq_tl)
 
 # plt.show()
 
@@ -433,21 +870,34 @@ Ln, = ax.plot(x_data, m_score)
 # plt.ion()
 nbr_repeatedValues = 0
 
+
 best_pop1 = get_best_pop2(pop)
 best_ind1 = pop[best_pop1]['ind']
 
-while(n<35):
+
+while(n<100):
+
 	#fitness population
 	pop = fitnesspop(pop, stations, wp_dict)
 	#tournament selection
 	winners = TournamentSelection(pop, 5, 2)
 	#crossover
-	mat1, mat2 = crossover(pop[winners[0]], pop[winners[1]], 12)
+	mat1, mat2 = crossover(pop[winners[0]], pop[winners[1]], 12, 4)
 	#fitness of new elements
-	val_n, mat1_score = fitness(mat1, stations, wp_dict)
-	val_n, mat2_score = fitness(mat2, stations, wp_dict)
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
+		mat1, stations, diversity_dict, diversity_mstd)
+	# print(seq_scores)
+	final_score_mat1 = (np.sum(exp_score_per_seq) * np.std(exp_score_per_seq)) / (
+				np.sum(div_score_per_seq) / np.std(div_score_per_seq))
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
+		mat2, stations, diversity_dict, diversity_mstd)
+	# print(seq_scores)
+	final_score_mat2 = (np.sum(exp_score_per_seq) * np.std(exp_score_per_seq)) / (
+			np.sum(div_score_per_seq) / np.std(div_score_per_seq))
+	# val_n, mat1_score = fitness(mat1, stations, wp_dict)
+	# val_n, mat2_score = fitness(mat2, stations, wp_dict)
 	#check if scores are good
-	pop = newpop(mat1, mat1_score, mat2, mat2_score, pop)
+	pop = newpop(mat1, final_score_mat1, mat2, final_score_mat2, pop)
 	#get mean scores
 	m_score.append(meanScores(pop))
 	x_data.append(iterations)
@@ -461,6 +911,7 @@ while(n<35):
 	plt.pause(.01)
 	plt.xlabel("Nbr of Cycles")
 	plt.ylabel("Mean Score of Population")
+
 	# if(m_score[-2]==m_score[-1]):
 	# 	nbr_repeatedValues+=1
 	# if(nbr_repeatedValues > 20):
@@ -474,6 +925,22 @@ while(n<35):
 	# 		nn+=1
 	# 	previous_score = current_score
 	# 	nbr_repeatedValues=0
+
+	if(m_score[-2]==m_score[-1]):
+		nbr_repeatedValues+=1
+	else:
+		nbr_repeatedValues = 0
+	if(nbr_repeatedValues > 40):
+		n = 1
+		pop = createPopulation(20, 4, 12)
+		current_score = meanScores(pop)
+		nn = 0
+		while(current_score>previous_score or nn<10):
+			pop = createPopulation(20, 4, 12)
+			current_score = meanScores(pop)
+			nn+=1
+		previous_score = current_score
+		nbr_repeatedValues=0
 
 plt.show(block=True)
 
@@ -489,7 +956,4 @@ createSquareMatrix(4, 12, all_colors, stations, best_ind1, score_per_seq_worse, 
 createSquareMatrix(4, 12, all_colors, stations, best_ind2, score_per_seq_best, subplt=212)
 plt.suptitle("Initial matrix ("+str(ind_score)+") vs Ending Matrix ("+str(ind_score2)+")")
 
-# plt.show()
-
-
-
+plt.show(block=True)
