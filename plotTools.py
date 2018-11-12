@@ -1,11 +1,13 @@
 import numpy as np
 import matplotlib.patches as patches
+from decimal import Decimal
 import matplotlib.collections as coll
 # import seaborn
 # from matplotlib.mlab import find
 # import pandas as pd
 # import regex as re
 import matplotlib.pyplot as plt
+import seaborn as sns
 # from mpl_toolkits.axes_grid.axes_grid import AxesGrid
 from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -38,6 +40,90 @@ def gradient(a, b, steps):
 def findcloser(array, value):
 	idx = (np.abs(array-value)).argmin()
 	return idx
+
+def add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stations, div_mstd, wp_dict, Circles):
+	# initial colors for diversity
+	bls = sns.color_palette('Blues')
+	green = (60/255, 179/255, 113/255)
+	gold = (1,215/255,0)
+	orange = 'orange'
+	red = (178/255, 34/255, 34/255)
+	for xi, x in zip(xx, range(0, ncols)):
+		ax.text(xi + wid/3, nrows + hei + 0.5, "Rot " + str(x))
+		for yi, y in zip(reversed(yy), range(0, nrows)):
+			sq_exp = patches.Rectangle((xi, yi + hei / 2), wid, hei / 2,
+									   fc=all_colors["Score_total_estacao"][ind[y][x] - 1], alpha=1)
+			ax.add_patch(sq_exp)
+			ax.text(xi + wid / 2 - len(str(wp_dict[stations[ind[y][x] - 1]]['OS'])) / 10, yi + 3 * hei / 5, str(wp_dict[stations[ind[y][x] - 1]]['OS']))
+			tk = wp_dict[stations[ind[y][x] - 1]]['%B']+wp_dict[stations[ind[y][x] - 1]]['%TB']
+			sh = wp_dict[stations[ind[y][x] - 1]]['%SH']+wp_dict[stations[ind[y][x] - 1]]['%HL']
+			el = wp_dict[stations[ind[y][x] - 1]]['%R6']
+
+			scores_div = [tk, sh, el]
+			br_div = ['tk','sh', 'el']
+
+			for xi2 in [0, 1, 2]:
+				div_x = xi + xi2 * wid / 3
+				if (scores_div[xi2] >= div_mstd[br_div[xi2]][0]):
+					color = red
+				elif (scores_div[xi2] < div_mstd[br_div[xi2]][0] and scores_div[xi2] > div_mstd[br_div[xi2]][1]):
+					color = orange
+				elif (scores_div[xi2] < div_mstd[br_div[xi2]][1] and scores_div[xi2] > div_mstd[br_div[xi2]][2]):
+					color = gold
+				elif (scores_div[xi2] < div_mstd[br_div[xi2]][2]):
+					color = green
+
+				if(xi2<2):
+					sq_div = patches.Rectangle((div_x, yi), (wid / 3) - wid / 100, hei / 2,
+										   fc=color, alpha=0.3)
+					ax.add_patch(sq_div)
+					ax.text(div_x + wid / 6 - len(str(scores_div[xi2])) / 10, yi + hei / 10, str(scores_div[xi2]))
+
+			sq_div = patches.Rectangle((xi + 2 * wid / 3, yi), (wid / 3), hei / 2,
+									   fc=color, alpha=0.3)
+			ax.text(xi + 2 * (wid / 3) + (wid / 6) - len(str(el)) / 10, yi + hei / 10, str(el))
+			ax.add_patch(sq_div)
+			if (Circles == True):
+				for index, key in enumerate(all_colors.keys()):
+					cr_post = patches.Circle((xi + 0.5 + 1.3 * index / 5, yi + hei / 2), 1 / 7,
+											 fc=all_colors[key][ind[y][x] - 1], alpha=0.3)
+					ax.add_patch(cr_post)
+
+			ax.text(-1.2, yi + hei / 2, "Wkr" + str(y))
+# ax.text(-1.2, yi + hei / 2, "Wkr" + str(y))
+# ax.text(wid * ncols + 0.2, yi + hei / 2, str(exp_score_per_seq[y]))
+# ax.text(wid * ncols + 1.2, yi + hei / 2, str(div_score_per_seq[y]))
+
+def createSquareMatrix2(ncols, nrows, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, diversity_mstd, wp_dict, Circles=False):
+	inbetween = 0.1
+	wid = 5
+	hei = 1
+	xx = np.arange(0, wid * ncols, (wid + inbetween))
+	yy = np.arange(0, hei * (nrows + 1), (hei + inbetween))
+	xx_exp = xx[-1] + inbetween + wid
+
+	fig = plt.figure(figsize=(100, 100))
+	ax = plt.subplot(111, aspect='equal')
+	#create matrix of squares
+	add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stations, diversity_mstd, wp_dict, Circles)
+	for index, yi in enumerate(reversed(yy)):
+		print(yi)
+		sq_scores_exp = patches.Rectangle((xx_exp, yi+hei/2), wid/2, hei/2, facecolor='grey', alpha=0.7)
+		ax.add_patch(sq_scores_exp)
+		ax.text(xx_exp + (wid / 3) - len(str(exp_score_per_seq[index])) / 10, yi + 2*hei/3, str(round(Decimal(exp_score_per_seq[index]),2)))
+		sq_scores_div = patches.Rectangle((xx_exp, yi), wid/2, hei/2, facecolor='grey', alpha=0.3)
+		ax.add_patch(sq_scores_div)
+		print(div_score_per_seq)
+		ax.text(xx_exp + (wid / 3) - len(str(div_score_per_seq[index])) / 10, yi+0.1, str(round(Decimal(div_score_per_seq[index]),2)))
+	exp_final_sc = np.sum(exp_score_per_seq)*np.std(exp_score_per_seq)
+	div_final_sc = np.sum(div_score_per_seq)/np.std(div_score_per_seq)
+
+	ax.text(wid * ncols, -1.0, "Exposure Score: " + str(round(Decimal(exp_final_sc),2)) + "   std: " + str(round(Decimal(np.std(exp_score_per_seq)),2)))
+	ax.text(wid * ncols, -1.5, "Diversity Score: " + str(round(Decimal(div_final_sc),2)) + "   std: " + str(round(Decimal(np.std(div_score_per_seq)),2)))
+	ax.text(wid * ncols, -0.5, "Final Score: " + str(exp_final_sc/div_final_sc))
+	plt.axis('off')
+	ax.axis([0, wid*(ncols+1), 0, nrows+2])
+
 
 def createSquareMatrix(ncols, nrows, all_colors, stations, ind, score_per_seq, Circles=False):
 	inbetween = 0.1
