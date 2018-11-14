@@ -41,16 +41,18 @@ def findcloser(array, value):
 	idx = (np.abs(array-value)).argmin()
 	return idx
 
-def add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stations, median_list, workers, wp_dict, Circles):
+def add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stations, quantile_list, workers, wp_dict, Circles):
 	# initial colors for diversity
 	bls = sns.color_palette('Blues')
 	green = (60/255, 179/255, 113/255)
 	gold = (1,215/255,0)
 	orange = 'orange'
 	red = (178/255, 34/255, 34/255)
+
 	for xi, x in zip(xx, range(0, ncols)):
 		ax.text(xi + wid/3, nrows + hei + 0.5, "Rot " + str(x))
 		for yi, y in zip(reversed(yy), range(0, nrows)):
+
 			sq_exp = patches.Rectangle((xi, yi + hei / 2), wid, hei / 2,
 									   fc=all_colors["Score_total_estacao"][ind[y][x] - 1], alpha=1)
 			ax.add_patch(sq_exp)
@@ -62,11 +64,16 @@ def add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stat
 			scores_div = [tk, sh, el]
 			br_div = ['tk','sh', 'el']
 
-			med = median_list[workers[y]]
-			for xi2 in [0, 1, 2]:
+			quantile = quantile_list[workers[y]]
+			for xi2, br in zip([0, 1, 2], br_div):
 				div_x = xi + xi2 * wid / 3
-				if (scores_div[xi2] >= med[br_div[xi2]]):
+
+				if (scores_div[xi2] >= quantile[br]['75']):
 					color = red
+				elif (scores_div[xi2] >= quantile[br]['50']) and (scores_div[xi2] < quantile[br]['75']):
+					color = orange
+				elif (scores_div[xi2] >= quantile[br]['25']) and (scores_div[xi2] < quantile[br]['50']):
+					color = gold
 				else:
 					color = green
 
@@ -91,38 +98,63 @@ def add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stat
 # ax.text(wid * ncols + 0.2, yi + hei / 2, str(exp_score_per_seq[y]))
 # ax.text(wid * ncols + 1.2, yi + hei / 2, str(div_score_per_seq[y]))
 
-def createSquareMatrix2(ncols, nrows, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, med_list, workers, wp_dict, Circles=False):
+def createSquareMatrix2(ncols, nrows, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, div_score_per_seq_br, quant_list, workers, wp_dict, Circles=False):
+	br_div = ['tk', 'sh', 'el']
+
 	inbetween = 0.1
 	wid = 5
 	hei = 1
 	xx = np.arange(0, wid * ncols, (wid + inbetween))
 	yy = np.arange(0, hei * (nrows + 1), (hei + inbetween))
 	xx_exp = xx[-1] + inbetween + wid
-	xx_exp2 = xx_exp + inbetween +wid/2
+	xx_exp2 = xx_exp + inbetween + wid
 
 	fig = plt.figure(figsize=(100, 100))
 	ax = plt.subplot(111, aspect='equal')
 	#create matrix of squares
-	add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stations, med_list, workers, wp_dict, Circles)
+	add_squared_matrix(ax, xx, yy, ncols, nrows, wid, hei, all_colors, ind, stations, quant_list, workers, wp_dict, Circles)
+	#add the final results
+
 	for index, yi in enumerate(reversed(yy)):
-		sq_scores_exp = patches.Rectangle((xx_exp, yi+hei/2), wid/2, hei/2, facecolor='grey', alpha=0.7)
+		#exposure
+		sq_scores_exp = patches.Rectangle((xx_exp, yi+hei/2), wid, hei/2, facecolor='grey', alpha=0.7)
 		sq_scores_exp2 = patches.Rectangle((xx_exp2, yi), wid/2, hei, facecolor='grey', alpha=0.7)
+
 
 		ax.add_patch(sq_scores_exp)
 		ax.add_patch(sq_scores_exp2)
 
-		ax.text(xx_exp + (wid / 3) - len(str(round(Decimal(exp_score_per_seq[index]),2))) / 10, yi + 2*hei/3, str(round(Decimal(exp_score_per_seq[index]),2)))
-		ax.text(xx_exp + wid / 3 - len("Score")/10, nrows + hei + 0.5, "Score")
+		ax.text(xx_exp + (wid / 2) - len(str(round(Decimal(exp_score_per_seq[index]),2))) / 10, yi + 2*hei/3, str(round(Decimal(exp_score_per_seq[index]),2)))
 		worker_final = exp_score_per_seq[index]/(1+div_score_per_seq[index])
 		ax.text(xx_exp2 + (wid / 4) - len(str(round(Decimal(worker_final),2))) / 10, yi + hei/2, str(round(Decimal(worker_final),2)))
-		ax.text(xx_exp2 + wid / 4 - len("Score C")/10, nrows + hei + 0.5, "Score C")
 
-		sq_scores_div = patches.Rectangle((xx_exp, yi), wid/2, hei/2, facecolor='grey', alpha=0.3)
-		ax.add_patch(sq_scores_div)
-		print(div_score_per_seq)
-		ax.text(xx_exp + (wid / 3) - len(str(round(Decimal(div_score_per_seq[index]),2))) / 10, yi+0.1, str(round(Decimal(div_score_per_seq[index]),2)))
+		#diversity
+		for xi2 in [0, 1, 2]:
+			div_x = xx_exp + xi2 * wid / 3
+			if (xi2 < 2):
+				sq_div = patches.Rectangle((div_x, yi), (wid / 3) - wid / 100, hei / 2,
+										   fc="grey", alpha=0.3)
+				ax.add_patch(sq_div)
+				ax.text(div_x + wid / 6 - len(str(div_score_per_seq_br[br_div[xi2]][index])) / 10, yi + hei / 10,
+						str(div_score_per_seq_br[br_div[xi2]][index]))
+			# plot linear diversity plot
+
+
+		sq_div = patches.Rectangle((xx_exp + 2 * wid / 3, yi), (wid / 3), hei / 2,
+								   fc="grey", alpha=0.3)
+		ax.text(xx_exp + 2 * (wid / 3) + (wid / 6) - len(str(div_score_per_seq_br[br_div[2]][index])) / 10, yi + hei / 10, str(div_score_per_seq_br[br_div[2]][index]))
+		ax.add_patch(sq_div)
+
+		# sq_scores_div = patches.Rectangle((xx_exp, yi), wid/2, hei/2, facecolor='grey', alpha=0.3)
+		# ax.add_patch(sq_scores_div)
+		# ax.text(xx_exp + (wid / 3) - len(str(round(Decimal(div_score_per_seq[index]),2))) / 10, yi+0.1, str(round(Decimal(div_score_per_seq[index]),2)))
+
+
 	exp_final_sc = np.sum(exp_score_per_seq)*(1+abs(np.std(exp_score_per_seq)))
 	div_final_sc = np.sum(div_score_per_seq)/(1+abs(np.std(div_score_per_seq)))
+
+	ax.text(xx_exp + wid / 2 - len("Score") / 10, nrows + hei + 0.5, "Score")
+	ax.text(xx_exp2 + wid / 4 - len("Score C") / 10, nrows + hei + 0.5, "Score C")
 
 	ax.text(wid * ncols, -1.0, "Exposure Score: " + str(round(Decimal(exp_final_sc),2)) + "   var: " + str(round(Decimal(abs(np.std(exp_score_per_seq))),2)))
 	ax.text(wid * ncols, -1.5, "Diversity Score: " + str(round(Decimal(div_final_sc),2)) + "   var: " + str(round(Decimal(abs(np.std(div_score_per_seq))),2)))
@@ -130,6 +162,14 @@ def createSquareMatrix2(ncols, nrows, all_colors, stations, ind, exp_score_per_s
 	plt.axis('off')
 	ax.axis([0, wid*(ncols+2), 0, nrows+2])
 
+def linear_plot_quantile(quant_sec, workers):
+	fig2, axes = plt.subplots(len(workers), 3, sharex=True)
+	for index in range(len(workers)):
+		for index2, br in enumerate(['tk', 'sh','el']):
+			axe = axes[index, index2]
+			axe.plot(quant_sec[index][br])
+
+	plt.show()
 
 def createSquareMatrix(ncols, nrows, all_colors, stations, ind, score_per_seq, Circles=False):
 	inbetween = 0.1

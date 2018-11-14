@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from GA_tests.plotTools import gradient, findcloser, createSquareMatrix, createWorkplaceMatrix, createSquareMatrix2
+from GA_tests.plotTools import gradient, findcloser, createSquareMatrix, createWorkplaceMatrix, createSquareMatrix2, linear_plot_quantile
 import matplotlib.pyplot as plt
 import random
 import time
@@ -70,23 +70,26 @@ def exposure_calc(exposure_seq):
 
 	return np.sum(np.multiply(duration, seq_k))
 
-def objective_exposureV3(exposure_mat, stations, diversity_d, diversity_median, workers):
+def objective_exposureV3(exposure_mat, stations, diversity_d, diversity_quant, workers):
 	scores_exp = []
 	scores_div = []
 	scores_div_per_musc = {'tk': [], 'sh': [], 'el': []}
+	quant_sec_per_workr = []
 	for index, worker in enumerate(exposure_mat):
 		seq = [stations[w - 1] for w in worker]
-		div_final_score, div_per_br = objective_diversityV3(workers[index], seq, diversity_d, diversity_median)
+		div_final_score, div_per_br, quant_sec = objective_diversityV4(workers[index], seq, diversity_d, diversity_quant)
 		for key in div_per_br.keys():
 			scores_div_per_musc[key].append(div_per_br[key])
 		scores_div.append(div_final_score)
 		scores_exp.append(exposure_calc(seq))
+		quant_sec_per_workr.append(quant_sec)
 
 	f_sdiv = np.sum(scores_div) / (1 + abs(np.std(scores_div)))
 	f_sexp = np.sum(scores_exp) * (1 + abs(np.std(scores_exp)))
 
 	# get standard deviation for homogeneity of scores
-	return scores_exp, f_sexp, scores_div, scores_div_per_musc, f_sdiv
+	return scores_exp, f_sexp, scores_div, scores_div_per_musc, f_sdiv, quant_sec_per_workr
+
 def objective_exposureV2(exposure_mat, stations, diversity_d, diversity_median):
 	scores_exp = []
 	scores_div = []
@@ -145,6 +148,31 @@ def get_diversity_levels(seq, dd, mstd):
 				ss[br].append(1)
 
 	return ss
+
+def objective_diversityV4(worker, seq, dd, quantile):
+	# score for each body region
+	f_ss = {'tk': [], 'sh': [], 'el': []}
+	quant_sec_per_br = {'tk': [], 'sh': [], 'el': []}
+	for br in ["tk", "sh", "el"]:
+		quant_seq = []
+		for ws in seq:
+			if (dd[ws][br] >= quantile[worker][br]['75']):
+				quant_seq.append(4)
+			elif (dd[ws][br] >= quantile[worker][br]['50']) and (dd[ws][br] < quantile[worker][br]['75']):
+				quant_seq.append(3)
+			elif (dd[ws][br] >= quantile[worker][br]['25']) and (dd[ws][br] < quantile[worker][br]['50']):
+				quant_seq.append(2)
+			else:
+				quant_seq.append(0)
+
+		# diversity for each body region (not counting with the amplitude of the jump
+		quant_sec_per_br[br] = quant_seq
+		f_ss[br] = sum([1 if(df>0) else 0 for df in abs(np.diff(quant_seq))])
+
+	final_score = (f_ss["tk"] + f_ss["sh"] + f_ss["el"]) / (1 + np.std(f_ss["tk"] + f_ss["sh"] + f_ss["el"]) ** 2)
+
+	return final_score, f_ss, quant_sec_per_br
+
 
 def objective_diversityV3(worker, seq, dd, medd):
 	#score for each body region
@@ -250,22 +278,27 @@ def createIndividual(Nshifts, Nworkers):
 
 def crossover(ind1, ind2, nworkers, nshifts):
 	types = ["skip_row", "skipcol"]
-	tp = types[random.randint(0, len(types)-1)]
+	# tp = types[random.randint(0, len(types)-1)]
+	tp = random.randint(1, 10)
+	print(tp)
 	#mating step
-	if tp is "skip_row":
+	if tp <= 3:
 		"""
 			With this each row is sequentially shifted between the two individuals
 		"""
 		mat1, mat2 = skiprow(ind1, ind2, nworkers)
 		mat1 = GeneControl(mat1)
 		mat2 = GeneControl(mat2)
+		d = 0
 
-	elif tp is "skipcol":
+	elif tp > 3:
 		mat1, mat2 = skipcol(ind1, ind2, nshifts)
 		mat1 = GeneControl(mat1)
 		mat2 = GeneControl(mat2)
 
-	return mat1, mat2
+		d = 1
+
+	return mat1, mat2, d
 
 
 def TournamentSelection(pop, k, n):
@@ -743,10 +776,28 @@ def load_median_list(score_dict, versatility):
 
 	return diversity_median
 
+def load_percentile_list(score_dict, versatility):
+	diversity_dict = {}
+	diversity_percentile = {}
+
+	for workstation in score_dict.keys():
+		diversity_dict[workstation] = {'tk': score_dict[workstation]['%B'] + score_dict[workstation]['%TB'],
+									   'sh': score_dict[workstation]['%SH'] + score_dict[workstation]['%HL'],
+									   'el': score_dict[workstation]['%R6'] + score_dict[workstation]['%R8']
+											 + score_dict[workstation]['%RT']}
+	for worker in versatility.index:
+		percentile_wk = {br:{'25': np.percentile([diversity_dict[ws][br] for ws in score_dict.keys()], 25),
+						 '50': np.percentile([diversity_dict[ws][br] for ws in score_dict.keys()], 50),
+						 '75': np.percentile([diversity_dict[ws][br] for ws in score_dict.keys()], 75)}  for br in ['tk', 'sh', 'el']}
+
+		diversity_percentile[worker] = percentile_wk
+
+	return diversity_percentile
+
 def load_versatility(file):
 	xl = pd.read_excel(file, "Versatilidade")
 	print(xl)
-	return xl.iloc[:12, :12], xl.index
+	return xl.iloc[:12, :12], xl.index[:12]
 
 
 #.....................................................................
@@ -769,10 +820,12 @@ def load_versatility(file):
 #load scores and versatility matrixes
 wp_dict, stations, post_score, force_score, vibration_score, risk_factors = load_scores()
 diversity_dict, diversity_mstd = list_scores_diversity(wp_dict)
-versatility, workers = load_versatility(r"/media/jean/FishStory/Projectos/Doutoramento/GeneticAlgorithmforRotationPlan/GA_tests/URQA4/Matriz versatilidade_A4B.xlsx")
+versatility, workers = load_versatility(r"C:\Users\rjoao\Documents\PhD\Algoritmo Plano Rotacional\GA_tests\URQA4\Matriz versatilidade_A4B.xlsx")
 #create list of median list for each worker and body region
 median_list = load_median_list(wp_dict, versatility)
-
+#load_percentile list
+percentile_list = load_percentile_list(wp_dict, versatility)
+print(percentile_list)
 #Matrix that shows the color risk of each workplace
 all_colors = createWorkplaceMatrix(risk_factors)
 
@@ -781,9 +834,10 @@ tl_dct = load_TL_example()
 
 #team leader matrixes representation
 for tl in tl_dct.keys():
-	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(
-		tl_dct[tl], stations, diversity_dict, median_list, workers)
-	createSquareMatrix2(4, 12, all_colors, stations, tl_dct[tl], exp_score_per_seq, div_score_per_seq, median_list, workers, wp_dict)
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score, quant_sec = objective_exposureV3(
+		tl_dct[tl], stations, diversity_dict, percentile_list, workers)
+	createSquareMatrix2(4, 12, all_colors, stations, tl_dct[tl], exp_score_per_seq, div_score_per_seq, div_scores_per_sec_musc, percentile_list, workers, wp_dict)
+	linear_plot_quantile(quant_sec, workers)
 	plt.show()
 #
 # #create a chromossome - rotation matrix
@@ -791,11 +845,11 @@ for tl in tl_dct.keys():
 # #find if it is valid or not
 # validateMatrix(ind)
 
-#calculate exposure and diversity vaues for the chromossome
-exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(ind, stations, diversity_dict, median_list, workers)
-#show the results in the matrix
-createSquareMatrix2(4, 12, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, diversity_mstd, wp_dict)
-plt.show()
+# #calculate exposure and diversity vaues for the chromossome
+# exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(ind, stations, diversity_dict, median_list, workers)
+# #show the results in the matrix
+# createSquareMatrix2(4, 12, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, diversity_mstd, wp_dict)
+# plt.show()
 
 
 
@@ -803,13 +857,12 @@ plt.show()
 #.....................................................................
 
 #genetic algorithm test
-pop = createPopulation(20, 4, 12)
+pop = createPopulation(50, 4, 12)
 
 for individual in range(0, len(pop)):
 	ind = pop[individual]['ind']
-	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
-		ind, stations, diversity_dict, diversity_mstd)
-	print(exp_ind_score)
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(
+		pop[individual]['ind'], stations, diversity_dict, median_list, workers)
 	# createSquareMatrix2(4, 12, all_colors, stations, ind, exp_score_per_seq, div_score_per_seq, diversity_mstd, wp_dict)
 	# plt.show()
 
@@ -819,15 +872,14 @@ min_score = 100000000
 min_index = 0
 for index in range(0, len(pop)):
 	# seq_scores, ind_score = fitness(pop[index]['ind'], stations, wp_dict)
-	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
-		pop[index]['ind'], stations, diversity_dict, diversity_mstd)
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(
+		pop[index]['ind'], stations, diversity_dict, median_list, workers)
 	# print(seq_scores)
-	final_score = (np.sum(exp_score_per_seq)*np.std(exp_score_per_seq))/(np.sum(div_score_per_seq)/np.std(div_score_per_seq))
+	final_score = (np.sum(exp_score_per_seq)*(1+np.std(exp_score_per_seq)))/(np.sum(div_score_per_seq)/(1+np.std(div_score_per_seq)))
 	pop[index]['score'] = final_score
-	if(ind_score < min_score):
+	if(final_score < min_score):
 		min_score = exp_ind_score
 		min_index = index
-
 
 # np.savez('10000pops.npz', pop=[pop])
 # print("Saved!!!")
@@ -848,10 +900,10 @@ all_colors = createWorkplaceMatrix(risk_factors)
 # createSquareMatrix(4, 12, all_colors, stations, load_TL_example(), score_per_seq_tl)
 
 #create square matrix of the best scored individual
-createSquareMatrix(4, 12, all_colors, stations, pop[min_index]['ind'], score_per_seq)
+# createSquareMatrix(4, 12, all_colors, stations, pop[min_index]['ind'], score_per_seq)
 
 #team_leader matrix
-createSquareMatrix(4, 12, all_colors, stations, load_TL_example(), score_per_seq_tl)
+# createSquareMatrix(4, 12, all_colors, stations, load_TL_example(), score_per_seq_tl)
 
 # plt.show()
 
@@ -864,9 +916,13 @@ iterations=1
 m_score = [meanScores(pop)]
 previous_score = meanScores(pop)
 x_data = [0]
+x_data2 = [0]
+m_score2 = [0]
 fig = plt.figure()
-ax = fig.add_subplot(111)
+ax = fig.add_subplot(211)
+ax2 = fig.add_subplot(212)
 Ln, = ax.plot(x_data, m_score)
+Ln2, = ax2.plot(x_data2, m_score2)
 # plt.ion()
 nbr_repeatedValues = 0
 
@@ -875,25 +931,25 @@ best_pop1 = get_best_pop2(pop)
 best_ind1 = pop[best_pop1]['ind']
 
 
-while(n<100):
+while(n<1000):
 
 	#fitness population
 	pop = fitnesspop(pop, stations, wp_dict)
 	#tournament selection
 	winners = TournamentSelection(pop, 5, 2)
 	#crossover
-	mat1, mat2 = crossover(pop[winners[0]], pop[winners[1]], 12, 4)
+	mat1, mat2, d = crossover(pop[winners[0]], pop[winners[1]], 12, 4)
 	#fitness of new elements
-	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
-		mat1, stations, diversity_dict, diversity_mstd)
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(
+		mat1, stations, diversity_dict, median_list, workers)
 	# print(seq_scores)
-	final_score_mat1 = (np.sum(exp_score_per_seq) * np.std(exp_score_per_seq)) / (
-				np.sum(div_score_per_seq) / np.std(div_score_per_seq))
-	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposure(
-		mat2, stations, diversity_dict, diversity_mstd)
+	final_score_mat1 = (np.sum(exp_score_per_seq) * (1 + np.std(exp_score_per_seq))) / (
+				np.sum(div_score_per_seq) / (1 + np.std(div_score_per_seq)))
+	exp_score_per_seq, exp_ind_score, div_score_per_seq, div_scores_per_sec_musc, div_ind_score = objective_exposureV3(
+		mat2, stations, diversity_dict, median_list, workers)
 	# print(seq_scores)
-	final_score_mat2 = (np.sum(exp_score_per_seq) * np.std(exp_score_per_seq)) / (
-			np.sum(div_score_per_seq) / np.std(div_score_per_seq))
+	final_score_mat2 = (np.sum(exp_score_per_seq) * (1 + np.std(exp_score_per_seq))) / (
+			np.sum(div_score_per_seq) / (1 + np.std(div_score_per_seq)))
 	# val_n, mat1_score = fitness(mat1, stations, wp_dict)
 	# val_n, mat2_score = fitness(mat2, stations, wp_dict)
 	#check if scores are good
@@ -903,11 +959,14 @@ while(n<100):
 	x_data.append(iterations)
 	Ln.set_xdata(x_data)
 	Ln.set_ydata(m_score)
+	Ln2.set_xdata(x_data)
+	Ln2.set_ydata(d)
 	#increase loopping round
 	n+=1
 	iterations+=1
 	ax.set_xlim(0, iterations+10)
 	ax.set_ylim(min(m_score)-10, max(m_score)+10)
+	ax2.set_xlim(0, iterations + 10)
 	plt.pause(.01)
 	plt.xlabel("Nbr of Cycles")
 	plt.ylabel("Mean Score of Population")
@@ -932,11 +991,11 @@ while(n<100):
 		nbr_repeatedValues = 0
 	if(nbr_repeatedValues > 40):
 		n = 1
-		pop = createPopulation(20, 4, 12)
+		pop = createPopulation(50, 4, 12)
 		current_score = meanScores(pop)
 		nn = 0
 		while(current_score>previous_score or nn<10):
-			pop = createPopulation(20, 4, 12)
+			pop = createPopulation(50, 4, 12)
 			current_score = meanScores(pop)
 			nn+=1
 		previous_score = current_score
